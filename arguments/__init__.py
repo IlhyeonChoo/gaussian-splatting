@@ -55,6 +55,9 @@ class ModelParams(ParamGroup):
         self._white_background = False
         self.train_test_exp = False
         self.data_device = "cuda"
+        self.max_train_cameras = 0
+        self.camera_quality_ratio = 0.7
+        self.camera_selection_seed = 42
         self.eval = False
         super().__init__(parser, "Loading Parameters", sentinel)
 

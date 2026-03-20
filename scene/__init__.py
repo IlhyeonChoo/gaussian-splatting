@@ -12,11 +12,63 @@
 import os
 import random
 import json
+import numpy as np
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
+from scene.colmap_loader import read_extrinsics_binary, read_extrinsics_text
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+
+def load_colmap_camera_quality(source_path):
+    """Return quality score per image_name based on valid 3D correspondences."""
+    bin_path = os.path.join(source_path, "sparse/0/images.bin")
+    txt_path = os.path.join(source_path, "sparse/0/images.txt")
+    try:
+        if os.path.exists(bin_path):
+            images = read_extrinsics_binary(bin_path)
+        elif os.path.exists(txt_path):
+            images = read_extrinsics_text(txt_path)
+        else:
+            return {}
+    except Exception:
+        return {}
+
+    quality = {}
+    for img in images.values():
+        quality[img.name] = int(np.sum(img.point3D_ids != -1))
+    return quality
+
+def subsample_cameras_quality_random(cameras, target_count, quality_scores, quality_ratio, seed):
+    if target_count <= 0 or len(cameras) <= target_count:
+        return cameras
+
+    ratio = max(0.0, min(1.0, float(quality_ratio)))
+    quality_pick = min(target_count, int(round(target_count * ratio)))
+
+    ranked = sorted(
+        cameras,
+        key=lambda c: (quality_scores.get(c.image_name, 0), c.image_name),
+        reverse=True,
+    )
+
+    selected = ranked[:quality_pick]
+    selected_names = {c.image_name for c in selected}
+    remaining = [c for c in cameras if c.image_name not in selected_names]
+
+    random_pick = target_count - len(selected)
+    if random_pick > 0 and remaining:
+        rng = random.Random(seed)
+        if random_pick >= len(remaining):
+            selected.extend(remaining)
+        else:
+            selected.extend(rng.sample(remaining, random_pick))
+
+    if len(selected) < target_count:
+        fallback = [c for c in ranked if c.image_name not in {x.image_name for x in selected}]
+        selected.extend(fallback[:target_count - len(selected)])
+
+    return sorted(selected[:target_count], key=lambda c: c.image_name)
 
 class Scene:
 
@@ -48,31 +100,53 @@ class Scene:
         else:
             assert False, "Could not recognize scene type!"
 
+        train_cam_infos = scene_info.train_cameras
+        test_cam_infos = scene_info.test_cameras
+
+        max_train_cameras = getattr(args, "max_train_cameras", 0)
+        if max_train_cameras > 0 and len(train_cam_infos) > max_train_cameras:
+            before = len(train_cam_infos)
+            quality_scores = load_colmap_camera_quality(args.source_path)
+            train_cam_infos = subsample_cameras_quality_random(
+                train_cam_infos,
+                max_train_cameras,
+                quality_scores,
+                getattr(args, "camera_quality_ratio", 0.7),
+                getattr(args, "camera_selection_seed", 42),
+            )
+            print(
+                "Limiting training cameras: "
+                f"{before} -> {len(train_cam_infos)} "
+                f"(max_train_cameras={max_train_cameras}, "
+                f"camera_quality_ratio={getattr(args, 'camera_quality_ratio', 0.7)}, "
+                f"seed={getattr(args, 'camera_selection_seed', 42)})"
+            )
+
         if not self.loaded_iter:
             with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
                 dest_file.write(src_file.read())
             json_cams = []
             camlist = []
-            if scene_info.test_cameras:
-                camlist.extend(scene_info.test_cameras)
-            if scene_info.train_cameras:
-                camlist.extend(scene_info.train_cameras)
+            if test_cam_infos:
+                camlist.extend(test_cam_infos)
+            if train_cam_infos:
+                camlist.extend(train_cam_infos)
             for id, cam in enumerate(camlist):
                 json_cams.append(camera_to_JSON(id, cam))
             with open(os.path.join(self.model_path, "cameras.json"), 'w') as file:
                 json.dump(json_cams, file)
 
         if shuffle:
-            random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
-            random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
+            random.shuffle(train_cam_infos)  # Multi-res consistent random shuffling
+            random.shuffle(test_cam_infos)  # Multi-res consistent random shuffling
 
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 
         for resolution_scale in resolution_scales:
             print("Loading Training Cameras")
-            self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale, args, scene_info.is_nerf_synthetic, False)
+            self.train_cameras[resolution_scale] = cameraList_from_camInfos(train_cam_infos, resolution_scale, args, scene_info.is_nerf_synthetic, False)
             print("Loading Test Cameras")
-            self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args, scene_info.is_nerf_synthetic, True)
+            self.test_cameras[resolution_scale] = cameraList_from_camInfos(test_cam_infos, resolution_scale, args, scene_info.is_nerf_synthetic, True)
 
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
@@ -80,7 +154,7 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"), args.train_test_exp)
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, scene_info.train_cameras, self.cameras_extent)
+            self.gaussians.create_from_pcd(scene_info.point_cloud, train_cam_infos, self.cameras_extent)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
