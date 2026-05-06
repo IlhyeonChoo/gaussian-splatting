@@ -101,12 +101,30 @@ prepare_data() {
         return 1
     fi
 
+    echo ""
+    echo "COLMAP 실행 모드를 선택하세요:"
+    echo "1) auto (기본, GPU 시도 후 실패하면 CPU로 재시도)"
+    echo "2) gpu  (GPU만 사용, 실패 시 종료)"
+    echo "3) cpu  (처음부터 CPU만 사용)"
+    read -p "선택 (1-3, 기본: 1): " colmap_mode_choice
+
+    case "${colmap_mode_choice:-1}" in
+        1) colmap_device="auto" ;;
+        2) colmap_device="gpu" ;;
+        3) colmap_device="cpu" ;;
+        *)
+            echo "잘못된 선택. 기본값(auto) 사용"
+            colmap_device="auto"
+            ;;
+    esac
+
     mkdir -p "$scene_path/input"
     copy_images_with_limit "$img_folder" "$scene_path/input" "$max_images" || return 1
     
     echo ""
+    echo "[INFO] COLMAP 실행 모드: $colmap_device"
     echo "COLMAP으로 카메라 포즈 추출 중... (시간이 걸릴 수 있습니다)"
-    python convert.py -s "$scene_path" || return 1
+    python convert.py -s "$scene_path" --colmap_device "$colmap_device" || return 1
 
     if [ -f "$scene_path/sparse/0/images.bin" ]; then
         cam_count=$(python - <<'PY' "$scene_path/sparse/0/images.bin"

@@ -455,8 +455,9 @@ For rasterization, the camera models must be either a SIMPLE_PINHOLE or PINHOLE 
 ```
  If you have COLMAP and ImageMagick on your system path, you can simply run 
 ```shell
-python convert.py -s <location> [--resize] #If not resizing, ImageMagick is not needed
+python convert.py -s <location> [--resize] [--colmap_device auto] #If not resizing, ImageMagick is not needed
 ```
+By default, `convert.py` uses `--colmap_device auto`, which first tries GPU-backed SIFT extraction/matching and falls back to CPU if that attempt fails. If the installed COLMAP binary reports `without CUDA`, `auto` skips the GPU attempt and runs on CPU directly. Use `--colmap_device gpu` to require GPU-only execution or `--colmap_device cpu` to disable GPU from the start.
 Alternatively, you can use the optional parameters ```--colmap_executable``` and ```--magick_executable``` to point to the respective paths. Please note that on Windows, the executable should point to the COLMAP ```.bat``` file that takes care of setting the execution environment. Once done, ```<location>``` will contain the expected COLMAP data set structure with undistorted, resized input images, in addition to your original images and some temporary (distorted) data in the directory ```distorted```.
 
 If you have your own COLMAP dataset without undistortion (e.g., using ```OPENCV``` camera), you can try to just run the last part of the script: Put the images in ```input``` and the COLMAP info in a subdirectory ```distorted```:
@@ -480,8 +481,10 @@ python convert.py -s <location> --skip_matching [--resize] #If not resizing, Ima
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for convert.py</span></summary>
 
+  #### --colmap_device
+  Device policy for COLMAP SIFT extraction/matching. Use ```auto``` (default) to try GPU first and retry on CPU, ```gpu``` to require GPU-only execution, or ```cpu``` to disable GPU from the start.
   #### --no_gpu
-  Flag to avoid using GPU in COLMAP.
+  Deprecated compatibility alias for ```--colmap_device cpu```.
   #### --skip_matching
   Flag to indicate that COLMAP info is available for images.
   #### --source_path / -s

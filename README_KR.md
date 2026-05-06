@@ -67,6 +67,19 @@ python convert.py -s data/my_scene
 - 카메라 위치와 각도 계산
 - 3D 포인트 클라우드 생성
 
+기본 동작은 `--colmap_device auto` 입니다.
+- `auto`: GPU를 먼저 시도하고 실패하면 CPU로 다시 시도
+- `gpu`: GPU만 사용하고 실패 시 종료
+- `cpu`: 처음부터 CPU만 사용
+
+설치된 COLMAP이 `without CUDA` 빌드라면 `auto`는 GPU 시도를 건너뛰고 CPU로 바로 진행합니다.
+
+예시:
+```bash
+python convert.py -s data/my_scene --colmap_device auto
+python convert.py -s data/my_scene --colmap_device cpu
+```
+
 #### 방법 B: 샘플 데이터 다운로드
 
 ```bash
@@ -129,7 +142,7 @@ source venv/bin/activate
 # 2. 자신의 이미지로 데이터 준비
 mkdir -p data/test_scene/input
 # 이미지들을 data/test_scene/input/에 복사한 후:
-python convert.py -s data/test_scene
+python convert.py -s data/test_scene --colmap_device auto
 
 # 3. 학습 (약 30분 소요, GPU에 따라 다름)
 python train.py -s data/test_scene --iterations 7000
