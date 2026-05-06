@@ -45,6 +45,19 @@ class SceneInfo(NamedTuple):
     ply_path: str
     is_nerf_synthetic: bool
 
+def get_camera_centers(cam_info):
+    cam_centers = []
+
+    for cam in cam_info:
+        W2C = getWorld2View2(cam.R, cam.T)
+        C2W = np.linalg.inv(W2C)
+        cam_centers.append(C2W[:3, 3])
+
+    if not cam_centers:
+        return np.empty((0, 3), dtype=np.float64)
+
+    return np.asarray(cam_centers, dtype=np.float64)
+
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
         cam_centers = np.hstack(cam_centers)
@@ -67,6 +80,67 @@ def getNerfppNorm(cam_info):
     translate = -center
 
     return {"translate": translate, "radius": radius}
+
+def filter_colmap_pose_outliers(train_cam_infos, test_cam_infos, mad_scale, min_cameras):
+    min_cameras = max(3, int(min_cameras))
+    mad_scale = float(mad_scale)
+
+    if mad_scale <= 0 or len(train_cam_infos) < min_cameras:
+        return train_cam_infos, test_cam_infos
+
+    train_centers = get_camera_centers(train_cam_infos)
+    robust_center = np.median(train_centers, axis=0)
+    train_distances = np.linalg.norm(train_centers - robust_center, axis=1)
+
+    distance_median = float(np.median(train_distances))
+    distance_mad = float(np.median(np.abs(train_distances - distance_median)))
+    robust_sigma = 1.4826 * distance_mad
+
+    if robust_sigma < 1e-6:
+        threshold = max(distance_median * 3.0, distance_median + 1.0, 1.0)
+    else:
+        threshold = distance_median + mad_scale * robust_sigma
+
+    keep_train_mask = train_distances <= threshold
+    filtered_train = [cam for cam, keep in zip(train_cam_infos, keep_train_mask) if keep]
+    removed_train = [cam for cam, keep in zip(train_cam_infos, keep_train_mask) if not keep]
+
+    if test_cam_infos:
+        test_centers = get_camera_centers(test_cam_infos)
+        test_distances = np.linalg.norm(test_centers - robust_center, axis=1)
+        keep_test_mask = test_distances <= threshold
+        filtered_test = [cam for cam, keep in zip(test_cam_infos, keep_test_mask) if keep]
+        removed_test = [cam for cam, keep in zip(test_cam_infos, keep_test_mask) if not keep]
+    else:
+        filtered_test = []
+        removed_test = []
+
+    total_removed = len(removed_train) + len(removed_test)
+    if total_removed == 0:
+        return train_cam_infos, test_cam_infos
+
+    # Avoid silently discarding a large fraction of a valid long-baseline capture.
+    if len(filtered_train) < max(3, len(train_cam_infos) // 2):
+        print(
+            "Skipping COLMAP pose outlier filtering because it would remove too many training cameras "
+            f"({len(train_cam_infos)} -> {len(filtered_train)})."
+        )
+        return train_cam_infos, test_cam_infos
+
+    print(
+        "Filtered COLMAP pose outliers: "
+        f"train {len(train_cam_infos)} -> {len(filtered_train)}, "
+        f"test {len(test_cam_infos)} -> {len(filtered_test)} "
+        f"(distance_median={distance_median:.3f}, robust_sigma={robust_sigma:.3f}, threshold={threshold:.3f})"
+    )
+    removed_names = [cam.image_name for cam in removed_train + removed_test]
+    preview_limit = 12
+    preview = ", ".join(removed_names[:preview_limit])
+    if len(removed_names) > preview_limit:
+        preview += ", ..."
+    print(f"Removed COLMAP pose outliers: {preview}")
+
+    return filtered_train, filtered_test
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_folder, depths_folder, test_cam_names_list):
     cam_infos = []
@@ -142,7 +216,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, depths, eval, train_test_exp, llffhold=8):
+def readColmapSceneInfo(path, images, depths, eval, train_test_exp, model_args=None, llffhold=8):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -199,6 +273,15 @@ def readColmapSceneInfo(path, images, depths, eval, train_test_exp, llffhold=8):
 
     train_cam_infos = [c for c in cam_infos if train_test_exp or not c.is_test]
     test_cam_infos = [c for c in cam_infos if c.is_test]
+
+    pose_outlier_mad_scale = getattr(model_args, "pose_outlier_mad_scale", 8.0)
+    pose_outlier_min_cameras = getattr(model_args, "pose_outlier_min_cameras", 12)
+    train_cam_infos, test_cam_infos = filter_colmap_pose_outliers(
+        train_cam_infos,
+        test_cam_infos,
+        pose_outlier_mad_scale,
+        pose_outlier_min_cameras,
+    )
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
@@ -270,7 +353,7 @@ def readCamerasFromTransforms(path, transformsfile, depths_folder, white_backgro
             
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, depths, eval, extension=".png"):
+def readNerfSyntheticInfo(path, white_background, depths, eval, model_args=None, extension=".png"):
 
     depths_folder=os.path.join(path, depths) if depths != "" else ""
     print("Reading Training Transforms")

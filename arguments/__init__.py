@@ -58,6 +58,8 @@ class ModelParams(ParamGroup):
         self.max_train_cameras = 0
         self.camera_quality_ratio = 0.7
         self.camera_selection_seed = 42
+        self.pose_outlier_mad_scale = 8.0
+        self.pose_outlier_min_cameras = 12
         self.eval = False
         super().__init__(parser, "Loading Parameters", sentinel)
 
