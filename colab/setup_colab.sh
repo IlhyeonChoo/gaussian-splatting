@@ -46,11 +46,54 @@ echo "[INFO] Installing Python runtime dependencies."
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r colab/requirements-colab.txt
 
-echo "[INFO] Initializing CUDA extension submodules."
-git submodule update --init --recursive \
+export GIT_TERMINAL_PROMPT=0
+
+clone_or_update_extension() {
+    local target="$1"
+    local url="$2"
+    local ref="${3:-}"
+
+    echo "[INFO] Preparing ${target}"
+    mkdir -p "$(dirname "${target}")"
+
+    if [ -e "${target}/.git" ]; then
+        git -C "${target}" remote set-url origin "${url}" || true
+        if [ -n "${ref}" ]; then
+            git -C "${target}" fetch --depth 1 origin "${ref}"
+            git -C "${target}" checkout --force FETCH_HEAD
+        else
+            git -C "${target}" fetch --depth 1 origin HEAD
+            git -C "${target}" checkout --force FETCH_HEAD
+        fi
+    elif [ -f "${target}/setup.py" ] || [ -f "${target}/pyproject.toml" ]; then
+        echo "[INFO] Using existing populated extension directory: ${target}"
+    else
+        rm -rf "${target}"
+        if [ -n "${ref}" ]; then
+            git clone --depth 1 --branch "${ref}" "${url}" "${target}"
+        else
+            git clone --depth 1 "${url}" "${target}"
+        fi
+    fi
+
+    if [ ! -f "${target}/setup.py" ] && [ ! -f "${target}/pyproject.toml" ]; then
+        echo "[ERROR] ${target} does not contain setup.py or pyproject.toml after checkout." >&2
+        exit 1
+    fi
+}
+
+echo "[INFO] Preparing CUDA extension source directories."
+clone_or_update_extension \
     submodules/diff-gaussian-rasterization \
+    https://github.com/graphdeco-inria/diff-gaussian-rasterization.git \
+    dr_aa
+clone_or_update_extension \
     submodules/simple-knn \
-    submodules/fused-ssim
+    https://gitlab.inria.fr/bkerbl/simple-knn.git
+clone_or_update_extension \
+    submodules/fused-ssim \
+    https://github.com/rahul-goel/fused-ssim.git \
+    main
 
 if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
     DETECTED_ARCH_LIST="$(python - <<'PY'
