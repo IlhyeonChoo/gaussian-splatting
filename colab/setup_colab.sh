@@ -80,6 +80,10 @@ clone_or_update_extension() {
         echo "[ERROR] ${target} does not contain setup.py or pyproject.toml after checkout." >&2
         exit 1
     fi
+
+    if [ -f "${target}/.gitmodules" ]; then
+        git -C "${target}" submodule update --init --recursive --depth 1
+    fi
 }
 
 echo "[INFO] Preparing CUDA extension source directories."
@@ -120,9 +124,9 @@ fi
 export MAX_JOBS="${MAX_JOBS:-2}"
 
 echo "[INFO] Building and installing local CUDA extensions."
-python -m pip install --no-build-isolation submodules/diff-gaussian-rasterization
-python -m pip install --no-build-isolation submodules/simple-knn
-python -m pip install --no-build-isolation submodules/fused-ssim
+python -m pip install --no-build-isolation --no-cache-dir -v submodules/diff-gaussian-rasterization
+python -m pip install --no-build-isolation --no-cache-dir -v submodules/simple-knn
+python -m pip install --no-build-isolation --no-cache-dir -v submodules/fused-ssim
 
 echo "[INFO] Validating installation."
 python - <<'PY'
