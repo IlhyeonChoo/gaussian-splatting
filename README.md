@@ -455,9 +455,10 @@ For rasterization, the camera models must be either a SIMPLE_PINHOLE or PINHOLE 
 ```
  If you have COLMAP and ImageMagick on your system path, you can simply run 
 ```shell
-python convert.py -s <location> [--resize] [--colmap_device auto] #If not resizing, ImageMagick is not needed
+python convert.py -s <location> [--resize] [--colmap_device auto] [--colmap_matcher exhaustive] #If not resizing, ImageMagick is not needed
 ```
 By default, `convert.py` uses `--colmap_device auto`, which first tries GPU-backed SIFT extraction/matching and falls back to CPU if that attempt fails. If the installed COLMAP binary reports `without CUDA`, `auto` skips the GPU attempt and runs on CPU directly. Use `--colmap_device gpu` to require GPU-only execution or `--colmap_device cpu` to disable GPU from the start.
+For COLMAP 4.1-style tuning, the converter also exposes matcher, feature extraction, matching, mapper, and undistortion options. For ordered video frames, try `--colmap_matcher sequential --sequential_overlap 10`. For lower memory use, try `--feature_max_image_size 1600 --sift_max_num_features 4096 --matching_max_num_matches 10000`. For difficult low-texture scenes, try increasing SIFT features and enabling guided matching, e.g. `--sift_max_num_features 16384 --sift_peak_threshold 0.003 --guided_matching 1`.
 Alternatively, you can use the optional parameters ```--colmap_executable``` and ```--magick_executable``` to point to the respective paths. Please note that on Windows, the executable should point to the COLMAP ```.bat``` file that takes care of setting the execution environment. Once done, ```<location>``` will contain the expected COLMAP data set structure with undistorted, resized input images, in addition to your original images and some temporary (distorted) data in the directory ```distorted```.
 
 If you have your own COLMAP dataset without undistortion (e.g., using ```OPENCV``` camera), you can try to just run the last part of the script: Put the images in ```input``` and the COLMAP info in a subdirectory ```distorted```:
@@ -483,6 +484,28 @@ python convert.py -s <location> --skip_matching [--resize] #If not resizing, Ima
 
   #### --colmap_device
   Device policy for COLMAP SIFT extraction/matching. Use ```auto``` (default) to try GPU first and retry on CPU, ```gpu``` to require GPU-only execution, or ```cpu``` to disable GPU from the start.
+  #### --colmap_matcher
+  COLMAP matcher command: ```exhaustive``` (default), ```sequential```, ```spatial```, or ```vocab_tree```. Use ```sequential``` for ordered video frames, ```spatial``` for position-prior image sets, and ```vocab_tree``` for large unordered sets with ```--vocab_tree_path```.
+  #### --feature_type / --matching_type
+  Feature and matcher backend. ```SIFT``` is the default. ```ALIKED``` and LightGlue matching types are exposed for COLMAP 4.1 experiments but may require ONNX model downloads or explicit model paths through extra arguments.
+  #### --feature_max_image_size / --sift_max_num_features / --sift_peak_threshold
+  SIFT extraction quality and memory controls. Lower image size and feature count for GPU/CPU memory pressure; raise feature count or lower peak threshold when too few images register.
+  #### --matching_max_num_matches / --guided_matching / --sift_matching_max_ratio / --two_view_max_error
+  Matching and two-view verification controls. Lower max matches to reduce memory use; enable guided matching for hard viewpoint changes; tighten ratio or reprojection error when outliers dominate.
+  #### --single_camera / --single_camera_per_folder / --camera_params / --mask_path / --camera_mask_path
+  Camera sharing and mask controls. The default keeps the previous behavior with one shared input camera. Disable it or use folder-level cameras when images come from different cameras, zoom levels, or crops. Masks can remove moving objects, sky, screens, or reflective regions from feature extraction.
+  #### --mapper_type
+  Sparse mapper backend: ```incremental``` (default COLMAP mapper) or ```global``` (COLMAP 4.1 global mapper experiment).
+  #### --mapper_min_num_matches / --mapper_filter_max_reproj_error / --mapper_tri_min_angle / --mapper_tri_ignore_two_view_tracks
+  Sparse reconstruction controls. Relax thresholds when too few cameras register; tighten reprojection filtering when sparse points contain many outliers.
+  #### --ba_refine_focal_length / --ba_refine_extra_params / --ba_refine_principal_point
+  Bundle adjustment intrinsic refinement controls. Keep refinement for unknown consumer cameras; disable selected refinement when calibration is known and should stay fixed.
+  #### --feature_gpu_index / --matching_gpu_index / --mapper_ba_gpu_index / --num_threads
+  GPU and CPU scheduling controls for multi-GPU or shared machines.
+  #### --undistort_max_image_size / --undistort_copy_policy / --undistort_jpeg_quality
+  Undistorted image output controls. Use max image size to cap 3DGS input resolution before training; copy policy can reduce disk duplication on supported filesystems.
+  #### --colmap_project_path / --extra_feature_args / --extra_matching_args / --extra_mapper_args / --extra_undistort_args
+  Advanced passthrough options for COLMAP project files or unsupported command-line flags. Extra arguments are parsed with shell-like quoting and appended to the corresponding COLMAP command.
   #### --no_gpu
   Deprecated compatibility alias for ```--colmap_device cpu```.
   #### --skip_matching

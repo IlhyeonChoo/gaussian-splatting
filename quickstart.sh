@@ -63,7 +63,21 @@ next_available_output_dir() {
 
 # 가상환경 활성화
 echo "가상환경 활성화 중..."
-source venv/bin/activate
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+else
+    echo "[WARN] venv/bin/activate를 찾을 수 없습니다. 시스템 Python을 사용합니다."
+fi
+
+if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN=python
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN=python3
+else
+    echo "오류: python 또는 python3 명령을 찾을 수 없습니다."
+    exit 1
+fi
+echo "[INFO] Python 실행기: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 
 # 함수: 데이터 준비
 prepare_data() {
@@ -118,16 +132,42 @@ prepare_data() {
             ;;
     esac
 
+    echo ""
+    echo "COLMAP 프리셋을 선택하세요:"
+    echo "1) default    (기본 exhaustive matcher)"
+    echo "2) video      (연속 프레임용 sequential matcher)"
+    echo "3) low-memory (낮은 해상도/특징점/매칭 수)"
+    echo "4) hard-scene (특징점 증가 + guided matching)"
+    read -p "선택 (1-4, 기본: 1): " colmap_preset_choice
+
+    colmap_args=()
+    case "${colmap_preset_choice:-1}" in
+        1) ;;
+        2) colmap_args=(--colmap_matcher sequential --sequential_overlap 10) ;;
+        3) colmap_args=(--feature_max_image_size 1600 --sift_max_num_features 4096 --matching_max_num_matches 10000) ;;
+        4) colmap_args=(--sift_max_num_features 16384 --sift_peak_threshold 0.003 --guided_matching 1) ;;
+        *)
+            echo "잘못된 선택. 기본값(default) 사용"
+            ;;
+    esac
+
     mkdir -p "$scene_path/input"
     copy_images_with_limit "$img_folder" "$scene_path/input" "$max_images" || return 1
     
     echo ""
     echo "[INFO] COLMAP 실행 모드: $colmap_device"
+    if [ "${#colmap_args[@]}" -gt 0 ]; then
+        echo "[INFO] COLMAP 추가 옵션: ${colmap_args[*]}"
+    else
+        echo "[INFO] COLMAP 추가 옵션: 없음"
+    fi
     echo "COLMAP으로 카메라 포즈 추출 중... (시간이 걸릴 수 있습니다)"
-    python convert.py -s "$scene_path" --colmap_device "$colmap_device" || return 1
+    convert_cmd=("$PYTHON_BIN" convert.py -s "$scene_path" --colmap_device "$colmap_device")
+    convert_cmd+=("${colmap_args[@]}")
+    "${convert_cmd[@]}" || return 1
 
     if [ -f "$scene_path/sparse/0/images.bin" ]; then
-        cam_count=$(python - <<'PY' "$scene_path/sparse/0/images.bin"
+        cam_count=$("$PYTHON_BIN" - "$scene_path/sparse/0/images.bin" <<'PY'
 import sys
 from utils.read_write_model import read_images_binary
 print(len(read_images_binary(sys.argv[1])))
@@ -205,7 +245,7 @@ extract_frames_from_video() {
     echo ""
     echo "프레임 추출 시작..."
 
-    cmd=(python extract_video_frames.py --video_path "$video_path" --output_dir "$output_dir" --mode "$mode" --target_fps "$target_fps")
+    cmd=("$PYTHON_BIN" extract_video_frames.py --video_path "$video_path" --output_dir "$output_dir" --mode "$mode" --target_fps "$target_fps")
 
     if [ "$mode" = "custom" ] || [ "$mode" = "both" ]; then
         if [ -n "$custom_width" ]; then
@@ -266,7 +306,7 @@ train_model() {
         echo "오류: 품질 우선 비율은 0~100 정수여야 합니다."
         return 1
     fi
-    camera_quality_ratio=$(python - <<'PY' "$quality_ratio_percent"
+    camera_quality_ratio=$("$PYTHON_BIN" - "$quality_ratio_percent" <<'PY'
 import sys
 print(int(sys.argv[1]) / 100.0)
 PY
@@ -288,7 +328,7 @@ PY
     fi
 
     if [ -f "$scene_path/sparse/0/images.bin" ]; then
-        camera_count=$(python - <<'PY' "$scene_path/sparse/0/images.bin"
+        camera_count=$("$PYTHON_BIN" - "$scene_path/sparse/0/images.bin" <<'PY'
 import sys
 from utils.read_write_model import read_images_binary
 print(len(read_images_binary(sys.argv[1])))
@@ -310,7 +350,7 @@ PY
     echo "[INFO] COLMAP 카메라 수: $camera_count, 학습 사용 카메라 수: $used_camera_count"
     echo "[INFO] 선택 방식: 품질 ${quality_ratio_percent}% + 랜덤 $((100 - quality_ratio_percent))% (seed=$camera_selection_seed)"
     echo "[INFO] 출력 경로: $model_path"
-    python train.py -s "$scene_path" --iterations "$iterations" --max_train_cameras "$max_train_cameras" --camera_quality_ratio "$camera_quality_ratio" --camera_selection_seed "$camera_selection_seed" -m "$model_path"
+    "$PYTHON_BIN" train.py -s "$scene_path" --iterations "$iterations" --max_train_cameras "$max_train_cameras" --camera_quality_ratio "$camera_quality_ratio" --camera_selection_seed "$camera_selection_seed" -m "$model_path"
     
     echo ""
     echo "✓ 학습 완료! 결과는 output/ 폴더에서 확인하세요"
@@ -335,7 +375,7 @@ render_model() {
     
     echo ""
     echo "렌더링 시작..."
-    python render.py -m "$model_path"
+    "$PYTHON_BIN" render.py -m "$model_path"
     
     echo ""
     echo "✓ 렌더링 완료!"

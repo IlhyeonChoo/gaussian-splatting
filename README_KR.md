@@ -74,10 +74,18 @@ python convert.py -s data/my_scene
 
 설치된 COLMAP이 `without CUDA` 빌드라면 `auto`는 GPU 시도를 건너뛰고 CPU로 바로 진행합니다.
 
+COLMAP 4.1 기준으로 matcher, 특징점, 매칭, mapper, undistortion 옵션도 조절할 수 있습니다.
+- 동영상 프레임처럼 순서가 있는 이미지: `--colmap_matcher sequential --sequential_overlap 10`
+- 메모리가 부족한 경우: `--feature_max_image_size 1600 --sift_max_num_features 4096 --matching_max_num_matches 10000`
+- 저텍스처/등록 실패가 많은 경우: `--sift_max_num_features 16384 --sift_peak_threshold 0.003 --guided_matching 1`
+- 서로 다른 카메라/줌/크롭 이미지가 섞인 경우: `--single_camera 0`
+- 학습 입력 해상도를 미리 제한하고 싶은 경우: `--undistort_max_image_size 1600`
+
 예시:
 ```bash
 python convert.py -s data/my_scene --colmap_device auto
 python convert.py -s data/my_scene --colmap_device cpu
+python convert.py -s data/my_scene --colmap_matcher sequential --sequential_overlap 10
 ```
 
 #### 방법 B: 샘플 데이터 다운로드
