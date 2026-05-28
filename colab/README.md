@@ -5,7 +5,7 @@ This directory contains a Colab-first workflow for preparing images from uploads
 ## Files
 
 - `Gaussian_Splatting_Colab.ipynb`: runnable Colab notebook.
-- `setup_colab.sh`: installs system packages, initializes CUDA extension submodules, and builds them against the active Colab PyTorch runtime.
+- `setup_colab.sh`: installs system packages, installs the conda-forge CUDA COLMAP build, initializes CUDA extension submodules, and builds them against the active Colab PyTorch runtime.
 - `requirements-colab.txt`: Python packages that are safe to install without replacing Colab PyTorch.
 - `colab_utils.py`: small helpers for preparing uploaded/Drive images, zips, or videos.
 
@@ -62,6 +62,10 @@ The archive can contain the scene directory itself or a nested directory such as
 ## Notes
 
 - The setup script does not install or pin PyTorch. It uses the PyTorch/CUDA version already present in the active Colab runtime.
+- Colab uses conda-forge COLMAP instead of the Ubuntu `apt` COLMAP package so the workflow can use a recent CUDA-enabled COLMAP build.
+- By default, setup installs `conda-forge::colmap=4.0.*` into `/content/colmap-conda` with `cuda-version=12.9`, then exposes it through `/usr/local/bin/colmap`.
+- If the conda solver cannot detect the Colab NVIDIA driver, setup retries with `CONDA_OVERRIDE_CUDA=13.0`. You can override the install with `COLAB_COLMAP_PREFIX`, `COLAB_COLMAP_VERSION`, or `COLAB_COLMAP_CUDA_VERSION` before running setup.
+- `nvidia-smi` may show `CUDA Version: 13.0`; that is the maximum CUDA API level supported by the driver. It does not prevent running a COLMAP package built for the CUDA 12.9 runtime on a compatible newer NVIDIA driver.
 - The SIBR real-time viewer is not supported in Colab.
 - Training commands pass `--disable_viewer` because Colab cannot use the local viewer socket workflow.
 - For limited Colab VRAM, use `--data_device cpu`, `--resolution 2` or `4`, and a modest `--max_train_cameras` value.
